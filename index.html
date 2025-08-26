@@ -138,9 +138,14 @@ let client = mqtt.connect(BROKER_URL, {clientId:"chat_"+Math.floor(Math.random()
 client.on("connect",()=>$("#connState").textContent="connesso");
 client.on("reconnect",()=>$("#connState").textContent="riconnessione...");
 client.on("close",()=>$("#connState").textContent="disconnesso");
-client.on("message",(topic,message)=>{
-  const msg=message.toString();
-  if(current && topic==="chat/"+current.nickname) log("<b>"+current.nickname+":</b> "+msg);
+client.on("message", (topic, message) => {
+  try {
+    const data = JSON.parse(message.toString());
+    if (data.from === me.nickname) return; // 🔥 ignora i tuoi messaggi
+    log(`<b>${data.from}:</b> ${data.text}`);
+  } catch (e) {
+    console.error("Messaggio non valido", e);
+  }
 });
 
 // Funzioni
@@ -165,3 +170,4 @@ window.onload=()=>{
 </script>
 </body>
 </html>
+
