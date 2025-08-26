@@ -68,89 +68,100 @@
 
 <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <script>
-const BROKER_URL = "wss://broker.emqx.io:8084/mqtt";
+const BROKER_URL = "wss://broker.emqx.io:8084/mqtt"; // broker WSS pubblico funzionante
 
 // Stato locale
-let me={nickname:null};
-let contacts=JSON.parse(localStorage.getItem("contacts")||"[]");
-let settings=JSON.parse(localStorage.getItem("settings")||"{}");
-let current=null;
+let me = { nickname:null };
+let contacts = JSON.parse(localStorage.getItem("contacts")||"[]");
+let settings = JSON.parse(localStorage.getItem("settings")||"{}");
+let current = null;
 
-// Traduzioni base
-const translations={it:{me:"Tu"},en:{me:"You"}};
+// Traduzioni
+const translations = {
+  it:{me:"Tu",contacts:"Contatti",settings:"Impostazioni",dark:"Modalità notte",
+      nickname:"Nickname",language:"Lingua",save:"Salva impostazioni",addContact:"Aggiungi contatto",
+      export:"Esporta",import:"Importa"},
+  en:{me:"You",contacts:"Contacts",settings:"Settings",dark:"Dark mode",
+      nickname:"Nickname",language:"Language",save:"Save settings",addContact:"Add contact",
+      export:"Export",import:"Import"}
+};
 
 // Helpers
 const $=s=>document.querySelector(s);
 function log(html,cls=""){ const d=$("#messages"); const e=document.createElement("div"); e.className="msg "+cls; e.innerHTML=html; d.appendChild(e); d.scrollTop=d.scrollHeight; }
-function persistContacts(){ localStorage.setItem("contacts",JSON.stringify(contacts)); }
+function redrawContacts(){ const ul=$("#contactList"); ul.innerHTML=""; contacts.forEach((c,i)=>{ const li=document.createElement("li"); li.textContent=c.nickname; li.onclick=()=>switchChat(i); ul.appendChild(li); }); persistContacts(); }
 function persistSettings(){ localStorage.setItem("settings",JSON.stringify(settings)); }
+function persistContacts(){ localStorage.setItem("contacts",JSON.stringify(contacts)); }
 
-// MQTT
-let client=mqtt.connect(BROKER_URL,{clientId:"chat_"+Math.floor(Math.random()*1000)});
-client.on("connect",()=>$("#connState").textContent="connesso");
-client.on("close",()=>$("#connState").textContent="disconnesso");
-client.on("reconnect",()=>$("#connState").textContent="riconnessione...");
+// Applica lingua
+function applyLanguage(){
+  const dict=translations[settings.language||"it"];
+  $("#contactsLabel").textContent=dict.contacts;
+  $("#settingsTitle").textContent=dict.settings;
+  $("#lblNickname").textContent=dict.nickname;
+  $("#lblDarkMode").textContent=dict.dark;
+  $("#lblLanguage").textContent=dict.language;
+  $("#saveBtn").textContent=dict.save;
+  $("#addBtn").textContent=dict.addContact;
+  $("#exportBtn").textContent=dict.export;
+  $("#importBtn").textContent=dict.import;
+}
 
-// Topic unico per coppia di utenti
-function dmTopic(u1,u2){ return ["chat",u1,u2].sort().join("_"); }
-
-// Quando arriva un messaggio
-client.on("message",(topic,message)=>{
-  if(!current) return;
-  const txt=message.toString();
-  // Mostra solo messaggi del topic attuale
-  if(topic===dmTopic(me.nickname,current.nickname)){
-    log("<b>"+current.nickname+":</b> "+txt);
-  }
-});
+// Settings
+function openSettings(){
+  $("#newNickname").value=settings.nickname||me.nickname;
+  $("#darkMode").checked=settings.darkMode||false;
+  $("#language").value=settings.language||"it";
+  $("#settingsPanel").style.display="block";
+}
+function saveSettings(){
+  settings.nickname=$("#newNickname").value.trim()||me.nickname;
+  settings.darkMode=$("#darkMode").checked;
+  settings.language=$("#language").value;
+  me.nickname=settings.nickname;
+  $("#meName").textContent=me.nickname;
+  if(settings.darkMode)document.body.classList.add("dark"); else document.body.classList.remove("dark");
+  applyLanguage();
+  persistSettings();
+  $("#settingsPanel").style.display="none";
+}
 
 // Chat
 function switchChat(i){
   current=contacts[i];
   $("#chatWith").textContent="Chat con "+current.nickname;
   $("#messages").innerHTML="";
-  const topic=dmTopic(me.nickname,current.nickname);
-  client.subscribe(topic);
 }
 
-$("#sendBtn").onclick=()=>{
-  if(!current) return;
-  const txt=$("#msg").value.trim();
-  if(!txt) return;
-  $("#msg").value="";
-  const topic=dmTopic(me.nickname,current.nickname);
-  log("<div class='me'><b>"+translations[settings.language||"it"].me+':</b> '+txt+"</div>","me");
-  client.publish(topic,txt);
-};
+// MQTT
+let client = mqtt.connect(BROKER_URL, {clientId:"chat_"+Math.floor(Math.random()*1000)});
+client.on("connect",()=>$("#connState").textContent="connesso");
+client.on("reconnect",()=>$("#connState").textContent="riconnessione...");
+client.on("close",()=>$("#connState").textContent="disconnesso");
+client.on("message",(topic,message)=>{
+  const msg=message.toString();
+  if(current && topic==="chat/"+current.nickname) log("<b>"+current.nickname+":</b> "+msg);
+});
 
-// Aggiungi contatto
-$("#addBtn").onclick=()=>{
-  const nick=prompt("Nickname contatto?");
-  if(!nick) return;
-  contacts.push({nickname:nick});
-  persistContacts();
-  redrawContacts();
-};
-
-// Redraw contatti
-function redrawContacts(){
-  const ul=$("#contactList");
-  ul.innerHTML="";
-  contacts.forEach((c,i)=>{
-    const li=document.createElement("li");
-    li.textContent=c.nickname;
-    li.onclick=()=>switchChat(i);
-    ul.appendChild(li);
-  });
-}
+// Funzioni
+$("#sendBtn").onclick=()=>{ if(!current)return; const txt=$("#msg").value.trim(); if(!txt)return; $("#msg").value=""; log("<div class='me'><b>"+translations[settings.language].me+':</b> '+txt+"</div>","me"); client.publish("chat/"+current.nickname,txt); }
+$("#msg").addEventListener("keydown",e=>{ if(e.key==="Enter")$("#sendBtn").click(); });
+$("#addBtn").onclick=()=>{ const nick=prompt("Nickname contatto?"); if(!nick)return; contacts.push({nickname:nick}); redrawContacts(); client.subscribe("chat/"+nick); };
+$("#exportBtn").onclick=()=>{ const blob=new Blob([JSON.stringify(contacts,null,2)],{type:"application/json"}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download="contacts.json"; a.click(); URL.revokeObjectURL(url); };
+$("#importBtn").onclick=()=>$("#importFile").click();
+$("#importFile").onchange=e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>{ try{ contacts=JSON.parse(ev.target.result); persistContacts(); redrawContacts(); alert("Contatti importati!"); } catch{ alert("File non valido"); } }; r.readAsText(f); };
 
 // Init
 window.onload=()=>{
   me.nickname=settings.nickname||("user"+Math.floor(Math.random()*999));
   $("#meName").textContent=me.nickname;
+  if(settings.darkMode) document.body.classList.add("dark");
+  applyLanguage();
   redrawContacts();
+  client.subscribe(contacts.map(c=>"chat/"+c.nickname));
+  $("#settingsBtn").addEventListener("click",openSettings);
+  $("#saveBtn").addEventListener("click",saveSettings);
 };
 </script>
-
 </body>
 </html>
