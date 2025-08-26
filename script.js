@@ -18,7 +18,11 @@ const translations = {
     save: "Salva impostazioni",
     addContact: "Aggiungi contatto",
     export: "Esporta",
-    import: "Importa"
+    import: "Importa",
+    connected: "connesso",
+    disconnected: "disconnesso",
+    writeMsg: "Scrivi un messaggio...",
+    send: "Invia"
   },
   en: {
     me: "You",
@@ -30,7 +34,11 @@ const translations = {
     save: "Save settings",
     addContact: "Add contact",
     export: "Export",
-    import: "Import"
+    import: "Import",
+    connected: "connected",
+    disconnected: "disconnected",
+    writeMsg: "Write a message...",
+    send: "Send"
   }
 };
 
@@ -103,6 +111,8 @@ function applyLanguage() {
   $("#addBtn").textContent = dict.addContact;
   $("#exportBtn").textContent = dict.export;
   $("#importBtn").textContent = dict.import;
+  $("#msg").placeholder = dict.writeMsg;
+  $("#sendBtn").textContent = dict.send;
 }
 
 // ======================
@@ -176,8 +186,40 @@ function importContacts(event) {
 }
 
 // ======================
-// Chat dummy
+// Chat con MQTT
 // ======================
+let client;
+
+function connectMQTT() {
+  client = mqtt.connect("wss://broker.emqx.io:8084/mqtt");
+
+  client.on("connect", () => {
+    $("#status").textContent = me.nickname + " | " + translations[settings.language].connected;
+    client.subscribe("chat/general");
+  });
+
+  client.on("message", (topic, payload) => {
+    const msg = JSON.parse(payload.toString());
+
+    // ignora i miei messaggi (non duplicarli)
+    if (msg.from === me.nickname) return;
+
+    if (!current || msg.from !== current.nickname) {
+      // se il messaggio viene da qualcuno che non sto guardando, aggiungo ai contatti
+      if (!contacts.find(c => c.nickname === msg.from)) {
+        contacts.push({ nickname: msg.from });
+        redrawContacts();
+      }
+    }
+
+    log(`<div><b>${msg.from}:</b> ${msg.text}</div>`);
+  });
+
+  client.on("close", () => {
+    $("#status").textContent = me.nickname + " | " + translations[settings.language].disconnected;
+  });
+}
+
 function switchChat(i) {
   current = contacts[i];
   $("#chatWith").textContent = "Chat con " + current.nickname;
@@ -190,12 +232,15 @@ function sendMsg() {
   if (!text) return;
   $("#msg").value = "";
 
-  const payload = JSON.stringify({ from: me.nickname, text: text });
-  client.publish("chat/global", payload);   // usa il tuo topic
+  // logga subito il mio messaggio
+  log(`<div class="me"><b>${translations[settings.language].me}:</b> ${text}</div>`, "me");
 
-  log(`<b>Tu:</b> ${text}`, "me");
+  // invia via MQTT
+  client.publish("chat/general", JSON.stringify({
+    from: me.nickname,
+    text
+  }));
 }
-
 
 // ======================
 // Init
@@ -203,6 +248,7 @@ function sendMsg() {
 window.onload = () => {
   loadSettings();
   loadContacts();
+  connectMQTT();
 
   $("#settingsBtn").addEventListener("click", openSettings);
   $("#saveBtn").addEventListener("click", saveSettings);
@@ -221,4 +267,3 @@ window.onload = () => {
   $("#exportBtn").addEventListener("click", exportContacts);
   $("#importFile").addEventListener("change", importContacts);
 };
-
