@@ -171,18 +171,25 @@ $("#importBtn").onclick=()=>$("#importFile").click();
 $("#importFile").onchange=e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>{ try{ contacts=JSON.parse(ev.target.result); persistContacts(); redrawContacts(); alert("Contatti importati!"); } catch{ alert("File non valido"); } }; r.readAsText(f); };
 
 // Init
-window.onload=()=>{
-  me.nickname=settings.nickname||("user"+Math.floor(Math.random()*999));
-  $("#meName").textContent=me.nickname;
-  if(settings.darkMode) document.body.classList.add("dark");
+window.onload = () => {
+  me.nickname = settings.nickname || ("user" + Math.floor(Math.random() * 999));
+  $("#meName").textContent = me.nickname;
+
+  if (settings.darkMode) document.body.classList.add("dark");
   applyLanguage();
   redrawContacts();
-  client.subscribe(contacts.map(c=>"chat/"+c.nickname));
-  $("#settingsBtn").addEventListener("click",openSettings);
-  $("#saveBtn").addEventListener("click",saveSettings);
+
+  // 🔥 Qui
+  $("#settingsBtn").addEventListener("click", openSettings);
+  $("#saveBtn").addEventListener("click", saveSettings);
+
+  // 🔥 Subscribo ai topic già salvati
+  contacts.forEach(c => client.subscribe("chat/" + c.nickname));
 };
+
 </script>
 </body>
 </html>
+
 
 
