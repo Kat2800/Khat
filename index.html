@@ -141,15 +141,29 @@ client.on("close",()=>$("#connState").textContent="disconnesso");
 client.on("message", (topic, message) => {
   try {
     const data = JSON.parse(message.toString());
-    if (data.from === me.nickname) return; // 🔥 ignora i tuoi messaggi
+    if (data.from === me.nickname) return; // ignora i tuoi
     log(`<b>${data.from}:</b> ${data.text}`);
   } catch (e) {
     console.error("Messaggio non valido", e);
   }
 });
 
+
 // Funzioni
-$("#sendBtn").onclick=()=>{ if(!current)return; const txt=$("#msg").value.trim(); if(!txt)return; $("#msg").value=""; log("<div class='me'><b>"+translations[settings.language].me+':</b> '+txt+"</div>","me"); client.publish("chat/"+current.nickname,txt); }
+$("#sendBtn").onclick = () => {
+  if (!current) return;
+  const txt = $("#msg").value.trim();
+  if (!txt) return;
+  $("#msg").value = "";
+
+  // Mostra subito il messaggio nella tua chat
+  log(`<div class="me"><b>${translations[settings.language].me}:</b> ${txt}</div>`, "me");
+
+  // 🔥 Invia come JSON
+  const payload = JSON.stringify({ from: me.nickname, text: txt });
+  client.publish("chat/" + current.nickname, payload);
+};
+
 $("#msg").addEventListener("keydown",e=>{ if(e.key==="Enter")$("#sendBtn").click(); });
 $("#addBtn").onclick=()=>{ const nick=prompt("Nickname contatto?"); if(!nick)return; contacts.push({nickname:nick}); redrawContacts(); client.subscribe("chat/"+nick); };
 $("#exportBtn").onclick=()=>{ const blob=new Blob([JSON.stringify(contacts,null,2)],{type:"application/json"}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download="contacts.json"; a.click(); URL.revokeObjectURL(url); };
@@ -170,4 +184,5 @@ window.onload=()=>{
 </script>
 </body>
 </html>
+
 
