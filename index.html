@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<title>Secure Chat MQTT</title>
+<style>
+  body { font-family: Arial,sans-serif; margin:0; padding:0; background:#f5f5f5; color:#333; }
+  body.dark { background:#1e1e1e; color:#eee; }
+  header { background:#4a90e2; color:white; padding:10px; display:flex; justify-content:space-between; align-items:center; }
+  #meName { font-weight:bold; }
+  #connState { font-size:0.9em; }
+  #main { display:flex; height:calc(100vh - 50px); }
+  #contacts { width:200px; padding:10px; border-right:1px solid #ccc; background:#fafafa; }
+  body.dark #contacts { background:#2a2a2a; }
+  #chat { flex:1; display:flex; flex-direction:column; }
+  #chatWith { padding:10px; font-weight:bold; border-bottom:1px solid #ccc; }
+  #messages { flex:1; overflow-y:auto; padding:10px; }
+  .msg { margin:5px 0; }
+  .msg.me { text-align:right; }
+  #inputBar { display:flex; padding:10px; border-top:1px solid #ccc; }
+  #inputBar input { flex:1; padding:5px; }
+  #inputBar button { margin-left:5px; }
+  #settingsPanel { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:20px; border:1px solid #ccc; z-index:100; }
+  body.dark #settingsPanel { background:#333; color:#fff; border-color:#666; }
+</style>
+</head>
+<body>
+<header>
+  <div><span id="meName"></span> | <span id="connState">disconnesso</span></div>
+  <div><button id="settingsBtn">⚙️ Impostazioni</button></div>
+</header>
+
+<div id="main">
+  <div id="contacts">
+    <h3 id="contactsLabel">Contatti</h3>
+    <ul id="contactList"></ul>
+    <button id="addBtn">➕ Aggiungi</button><br><br>
+    <button id="exportBtn">⬇️ Export contatti</button>
+    <input type="file" id="importFile" style="display:none">
+    <button id="importBtn">⬆️ Import contatti</button>
+  </div>
+  <div id="chat">
+    <div id="chatWith">Seleziona un contatto</div>
+    <div id="messages"></div>
+    <div id="inputBar">
+      <input id="msg" placeholder="Scrivi un messaggio...">
+      <button id="sendBtn">Invia</button>
+    </div>
+  </div>
+</div>
+
+<div id="settingsPanel">
+  <h3 id="settingsTitle">Impostazioni</h3>
+  <label id="lblNickname">Nickname: <input id="newNickname"></label><br><br>
+  <label><input type="checkbox" id="darkMode" id="lblDarkMode"> Modalità notte</label><br><br>
+  <label id="lblLanguage">Lingua:
+    <select id="language">
+      <option value="it">Italiano</option>
+      <option value="en">English</option>
+    </select>
+  </label><br><br>
+  <button id="saveBtn">Salva impostazioni</button>
+  <button onclick="document.getElementById('settingsPanel').style.display='none'">Chiudi</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/mqttws31.min.js"></script>
+<script>
+const BROKER_URL = "wss://broker.emqx.io:8084/mqtt";
+let client;
+let me = { nickname: null };
+let contacts = [];
+let settings = { nickname:"", darkMode:false, language:"it" };
+let current = null;
+
+const translations = {
+  it:{me:"Tu", contacts:"Contatti", settings:"Impostazioni", dark:"Modalità notte", nickname:"Nickname", language:"Lingua", save:"Salva impostazioni", addContact:"Aggiungi contatto", export:"Esporta", import:"Importa"},
+  en:{me:"You", contacts:"Contacts", settings:"Settings", dark:"Dark mode", nickname:"Nickname", language:"Language", save:"Save settings", addContact:"Add contact", export:"Export", import:"Import"}
+};
+
+// ====================== UI Helpers ======================
+const $ = sel => document.querySelector(sel);
+function log(html, cls="") {
+  const d=$("#messages");
+  const el=document.createElement("div");
+  el.className="msg "+cls;
+  el.innerHTML=html;
+  d.appendChild(el);
+  d.scrollTop=d.scrollHeight;
+}
+function redrawContacts() {
+  const ul=$("#contactList");
+  ul.innerHTML="";
+  contacts.forEach((c,i)=>{
+    const li=document.createElement("li");
+    li.textContent=c.nickname;
+    li.onclick=()=>switchChat(i);
+    ul.appendChild(li);
+  });
+  persistContacts();
+}
+
+// ====================== Settings ======================
+function openSettings() {
+  $("#newNickname").value = settings.nickname || me.nickname;
+  $("#darkMode").checked = settings.darkMode;
+  $("#language").value = settings.language;
+  $("#settingsPanel").style.display = "block";
+}
+function saveSettings() {
+  settings.nickname = $("#newNickname").value.trim() || me.nickname;
+  settings.darkMode = $("#darkMode").checked;
+  settings.language = $("#language").value;
+
+  me.nickname = settings.nickname;
+  $("#meName").textContent = me.nickname;
+
+  if(settings.darkMode) document.body.classList.add("dark");
+  else document.body.classList.remove("dark");
+
+  applyLanguage();
+  persistSettings();
+  $("#settingsPanel").style.display = "none";
+}
+function applyLanguage() {
+  const dict = translations[settings.language];
+  $("#contactsLabel").textContent = dict.contacts;
+  $("#settingsTitle").textContent = dict.settings;
+  $("#lblNickname").textContent = dict.nickname;
+  $("#lblDarkMode").textContent = dict.dark;
+  $("#lblLanguage").textContent = dict.language;
+  $("#saveBtn").textContent = dict.save;
+  $("#addBtn").textContent = dict.addContact;
+  $("#exportBtn").textContent = dict.export;
+  $("#importBtn").textContent = dict.import;
+  $("#msg").placeholder = settings.language==="en"?"Write a message...":"Scrivi un messaggio...";
+  $("#sendBtn").textContent = settings.language==="en"?"Send":"Invia";
+  $("#settingsBtn").textContent = settings.language==="en"?"⚙️ Settings":"⚙️ Impostazioni";
+}
+
+// ====================== Persistenza ======================
+function persistSettings(){ localStorage.setItem("settings", JSON.stringify(settings)); }
+function loadSettings(){
+  const raw=localStorage.getItem("settings");
+  if(raw){ settings=JSON.parse(raw); me.nickname=settings.nickname; }
+  else{ me.nickname = prompt("Il tuo nickname:") || "user"+Math.floor(Math.random()*999); settings.nickname = me.nickname; persistSettings(); }
+  $("#meName").textContent=me.nickname;
+  if(settings.darkMode) document.body.classList.add("dark");
+  applyLanguage();
+}
+
+function persistContacts(){ localStorage.setItem("contacts", JSON.stringify(contacts)); }
+function loadContacts(){ const raw=localStorage.getItem("contacts"); if(raw){ contacts=JSON.parse(raw); redrawContacts(); }}
+
+// ====================== Chat ======================
+function switchChat(i){ current=contacts[i]; $("#chatWith").textContent="Chat con "+current.nickname; $("#messages").innerHTML=""; }
+
+function sendMsg(){
+  if(!current) return;
+  const text=$("#msg").value.trim();
+  if(!text) return;
+  $("#msg").value="";
+  log(`<b>${translations[settings.language].me}:</b> ${text}`,"me");
+
+  // invio MQTT
+  if(client && client.isConnected() && current.topic){
+    client.send(current.topic, text);
+  }
+}
+
+// ====================== MQTT ======================
+function initMQTT(){
+  client = new Paho.MQTT.Client("wss://broker.emqx.io:8084/mqtt", me.nickname+"_"+Math.floor(Math.random()*1000));
+
+  client.onConnectionLost = e=>{$("#connState").textContent="disconnesso";}
+  client.onMessageArrived = msg=>{
+    // ricevi messaggio
+    const parts = msg.destinationName.split("/");
+    const otherNick = parts[2];
+    const contact = contacts.find(c=>c.nickname===otherNick);
+    if(contact && contact.nickname!==me.nickname){
+      log(`<b>${contact.nickname}:</b> ${msg.payloadString}`,"");
+    }
+  };
+  client.connect({onSuccess:()=>{
+    $("#connState").textContent="connesso";
+    // iscrivi a topic di tutti i contatti
+    contacts.forEach(c=>{
+      c.topic=`chat/${[me.nickname,c.nickname].sort().join("_")}`;
+      client.subscribe(c.topic);
+    });
+  }});
+}
+
+// ====================== Init ======================
+window.onload=()=>{
+  loadSettings();
+  loadContacts();
+  $("#settingsBtn").addEventListener("click", openSettings);
+  $("#saveBtn").addEventListener("click", saveSettings);
+  $("#sendBtn").addEventListener("click", sendMsg);
+  $("#msg").addEventListener("keydown", e=>{if(e.key==="Enter") sendMsg();});
+  $("#addBtn").addEventListener("click", ()=>{
+    const nick = prompt("Nickname contatto?");
+    if(!nick) return;
+    contacts.push({nickname:nick, topic:`chat/${[me.nickname,nick].sort().join("_")}`});
+    persistContacts();
+    redrawContacts();
+    if(client && client.isConnected()) client.subscribe(contacts[contacts.length-1].topic);
+  });
+  $("#exportBtn").addEventListener("click", ()=>{
+    const blob=new Blob([JSON.stringify(contacts,null,2)],{type:"application/json"});
+    const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="contacts.json"; a.click();
+  });
+  $("#importBtn").addEventListener("click", ()=>$("#importFile").click());
+  $("#importFile").addEventListener("change", e=>{
+    const file=e.target.files[0]; if(!file) return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      try{ contacts=JSON.parse(ev.target.result); persistContacts(); redrawContacts(); alert("Contatti importati!"); }
+      catch(err){ alert("File non valido"); }
+    };
+    reader.readAsText(file);
+  });
+
+  initMQTT();
+};
+</script>
+</body>
+</html>
