@@ -189,9 +189,13 @@ function sendMsg() {
   const text = $("#msg").value.trim();
   if (!text) return;
   $("#msg").value = "";
-  log(`<div class="me"><b>${translations[settings.language].me}:</b> ${text}</div>`, "me");
-  // qui andrebbe la cifratura + publish via MQTT
+
+  const payload = JSON.stringify({ from: me.nickname, text: text });
+  client.publish("chat/global", payload);   // usa il tuo topic
+
+  log(`<b>Tu:</b> ${text}`, "me");
 }
+
 
 // ======================
 // Init
@@ -217,3 +221,4 @@ window.onload = () => {
   $("#exportBtn").addEventListener("click", exportContacts);
   $("#importFile").addEventListener("change", importContacts);
 };
+
