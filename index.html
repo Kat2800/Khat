@@ -8,7 +8,7 @@
   body.dark { background:#1e1e1e; color:#eee; }
   header { background:#4a90e2; color:white; padding:10px; display:flex; justify-content:space-between; align-items:center; }
   #meName { font-weight:bold; }
-  #main { display:flex; height:calc(100vh-50px); }
+  #main { display:flex; height:calc(100vh - 50px); }
   #contacts { border-right:1px solid #ccc; width:200px; padding:10px; background:#fafafa; }
   body.dark #contacts { background:#2a2a2a; }
   #contacts ul { list-style:none; padding:0; margin:0; }
@@ -54,23 +54,23 @@
 
 <div id="settingsPanel">
   <h3 id="settingsTitle">Impostazioni</h3>
-  <label id="lblNickname">Nickname: <input id="newNickname"></label><br><br>
+  <label><span id="lblNickname">Nickname:</span> <input id="newNickname"></label><br><br>
   <label><input type="checkbox" id="darkMode"> <span id="lblDarkMode">Modalità notte</span></label><br><br>
-  <label id="lblLanguage">Lingua:
+  <label><span id="lblLanguage">Lingua:</span>
     <select id="language">
       <option value="it">Italiano</option>
       <option value="en">English</option>
     </select>
   </label><br><br>
   <button id="saveBtn">Salva impostazioni</button>
-  <button onclick="document.getElementById('settingsPanel').style.display='none'">Chiudi</button>
+  <button id="closeSettings">Chiudi</button>
 </div>
 
 <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <script>
-const BROKER_URL = "wss://broker.emqx.io:8084/mqtt"; // broker WSS pubblico funzionante
+const BROKER_URL = "wss://broker.emqx.io:8084/mqtt"; // broker pubblico
 
-// Stato locale
+// Stato
 let me = { nickname:null };
 let contacts = JSON.parse(localStorage.getItem("contacts")||"[]");
 let settings = JSON.parse(localStorage.getItem("settings")||"{}");
@@ -93,14 +93,14 @@ function redrawContacts(){ const ul=$("#contactList"); ul.innerHTML=""; contacts
 function persistSettings(){ localStorage.setItem("settings",JSON.stringify(settings)); }
 function persistContacts(){ localStorage.setItem("contacts",JSON.stringify(contacts)); }
 
-// Applica lingua
+// Lingua
 function applyLanguage(){
   const dict=translations[settings.language||"it"];
   $("#contactsLabel").textContent=dict.contacts;
   $("#settingsTitle").textContent=dict.settings;
-  $("#lblNickname").textContent=dict.nickname;
+  $("#lblNickname").textContent=dict.nickname+":";
   $("#lblDarkMode").textContent=dict.dark;
-  $("#lblLanguage").textContent=dict.language;
+  $("#lblLanguage").textContent=dict.language+":";
   $("#saveBtn").textContent=dict.save;
   $("#addBtn").textContent=dict.addContact;
   $("#exportBtn").textContent=dict.export;
@@ -141,55 +141,43 @@ client.on("close",()=>$("#connState").textContent="disconnesso");
 client.on("message", (topic, message) => {
   try {
     const data = JSON.parse(message.toString());
-    if (data.from === me.nickname) return; // ignora i tuoi
+    if (data.from === me.nickname) return;
     log(`<b>${data.from}:</b> ${data.text}`);
   } catch (e) {
     console.error("Messaggio non valido", e);
   }
 });
 
-
-// Funzioni
+// Invia messaggi
 $("#sendBtn").onclick = () => {
   if (!current) return;
   const txt = $("#msg").value.trim();
   if (!txt) return;
   $("#msg").value = "";
-
-  // Mostra subito il messaggio nella tua chat
-  log(`<div class="me"><b>${translations[settings.language].me}:</b> ${txt}</div>`, "me");
-
-  // 🔥 Invia come JSON
+  log(`<b>${translations[settings.language||"it"].me}:</b> ${txt}`,"me");
   const payload = JSON.stringify({ from: me.nickname, text: txt });
   client.publish("chat/" + current.nickname, payload);
 };
-
 $("#msg").addEventListener("keydown",e=>{ if(e.key==="Enter")$("#sendBtn").click(); });
+
+// Gestione contatti
 $("#addBtn").onclick=()=>{ const nick=prompt("Nickname contatto?"); if(!nick)return; contacts.push({nickname:nick}); redrawContacts(); client.subscribe("chat/"+nick); };
 $("#exportBtn").onclick=()=>{ const blob=new Blob([JSON.stringify(contacts,null,2)],{type:"application/json"}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download="contacts.json"; a.click(); URL.revokeObjectURL(url); };
 $("#importBtn").onclick=()=>$("#importFile").click();
 $("#importFile").onchange=e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>{ try{ contacts=JSON.parse(ev.target.result); persistContacts(); redrawContacts(); alert("Contatti importati!"); } catch{ alert("File non valido"); } }; r.readAsText(f); };
 
 // Init
-window.onload = () => {
+document.addEventListener("DOMContentLoaded", () => {
   me.nickname = settings.nickname || ("user" + Math.floor(Math.random() * 999));
   $("#meName").textContent = me.nickname;
-
   if (settings.darkMode) document.body.classList.add("dark");
   applyLanguage();
   redrawContacts();
-
-  // 🔥 Qui
   $("#settingsBtn").addEventListener("click", openSettings);
   $("#saveBtn").addEventListener("click", saveSettings);
-
-  // 🔥 Subscribo ai topic già salvati
+  $("#closeSettings").addEventListener("click", ()=>$("#settingsPanel").style.display="none");
   contacts.forEach(c => client.subscribe("chat/" + c.nickname));
-};
-
+});
 </script>
 </body>
 </html>
-
-
-
